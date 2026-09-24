@@ -46,18 +46,50 @@ type MapStyleType = 'dark' | 'satellite' | 'light';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // BUILD MAP STYLE — all sources and layers are baked in with strict z-ordering
+// All 3 basemaps live in ONE style. No setStyle() is ever called.
 // ─────────────────────────────────────────────────────────────────────────────
-function buildMapStyle(type: MapStyleType): maplibregl.StyleSpecification {
+export function setBasemapVisibility(map: maplibregl.Map, type: MapStyleType) {
+  const layerMap: Record<MapStyleType, string> = {
+    light: 'base-osm',
+    satellite: 'base-sat',
+    dark: 'base-dark'
+  };
+  (['light', 'satellite', 'dark'] as MapStyleType[]).forEach((t) => {
+    const layerId = layerMap[t];
+    try {
+      if (map.getLayer(layerId)) {
+        map.setLayoutProperty(layerId, 'visibility', t === type ? 'visible' : 'none');
+      }
+    } catch (e) {
+      console.warn(`[MAP] Error toggling basemap layer ${layerId}:`, e);
+    }
+  });
+}
+
+function buildMapStyle(initialType: MapStyleType = 'satellite'): maplibregl.StyleSpecification {
   const emptyFC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
-  const src = TILE_SOURCES[type];
 
   const sources: Record<string, any> = {
-    'base-tiles': {
+    'base-osm': {
       type: 'raster',
-      tiles: [...src.tiles],
-      tileSize: src.tileSize,
-      attribution: src.attribution,
-      maxzoom: src.maxzoom
+      tiles: [...TILE_SOURCES.light.tiles],
+      tileSize: TILE_SOURCES.light.tileSize,
+      attribution: TILE_SOURCES.light.attribution,
+      maxzoom: TILE_SOURCES.light.maxzoom
+    },
+    'base-sat': {
+      type: 'raster',
+      tiles: [...TILE_SOURCES.satellite.tiles],
+      tileSize: TILE_SOURCES.satellite.tileSize,
+      attribution: TILE_SOURCES.satellite.attribution,
+      maxzoom: TILE_SOURCES.satellite.maxzoom
+    },
+    'base-dark': {
+      type: 'raster',
+      tiles: [...TILE_SOURCES.dark.tiles],
+      tileSize: TILE_SOURCES.dark.tileSize,
+      attribution: TILE_SOURCES.dark.attribution,
+      maxzoom: TILE_SOURCES.dark.maxzoom
     },
     'selected-site': { type: 'geojson', data: emptyFC },
     'selected-site-points': { type: 'geojson', data: emptyFC },
@@ -68,8 +100,31 @@ function buildMapStyle(type: MapStyleType): maplibregl.StyleSpecification {
   };
 
   const layers: maplibregl.LayerSpecification[] = [
-    // 1. Base raster map
-    { id: 'base-tiles-layer', type: 'raster', source: 'base-tiles', minzoom: 0, maxzoom: 22 },
+    // 1. All 3 Base raster maps in ONE style — switch by toggling visibility
+    {
+      id: 'base-osm',
+      type: 'raster',
+      source: 'base-osm',
+      minzoom: 0,
+      maxzoom: 22,
+      layout: { visibility: initialType === 'light' ? 'visible' : 'none' }
+    },
+    {
+      id: 'base-sat',
+      type: 'raster',
+      source: 'base-sat',
+      minzoom: 0,
+      maxzoom: 22,
+      layout: { visibility: initialType === 'satellite' ? 'visible' : 'none' }
+    },
+    {
+      id: 'base-dark',
+      type: 'raster',
+      source: 'base-dark',
+      minzoom: 0,
+      maxzoom: 22,
+      layout: { visibility: initialType === 'dark' ? 'visible' : 'none' }
+    },
 
     // 2. Selected Site Polygon — unmissable on ANY basemap (dark casing technique)
     // Darker green fill
@@ -267,6 +322,8 @@ function buildMapStyle(type: MapStyleType): maplibregl.StyleSpecification {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SAFE GEOJSON SOURCE UPDATER
+// Never guards with isStyleLoaded() or once('load').
+// If getSource(id) exists -> setData. Else retry once on 'style.load'.
 // ─────────────────────────────────────────────────────────────────────────────
 function safeSetSource(map: maplibregl.Map | null, id: string, data: any) {
   if (!map) return;
@@ -275,12 +332,14 @@ function safeSetSource(map: maplibregl.Map | null, id: string, data: any) {
     if (src) {
       src.setData(data);
     } else {
-      if (!map.isStyleLoaded()) {
-        map.once('load', () => {
+      map.once('style.load', () => {
+        try {
           const retrySrc = map.getSource(id) as maplibregl.GeoJSONSource | undefined;
           if (retrySrc) retrySrc.setData(data);
-        });
-      }
+        } catch (e) {
+          console.warn(`[MAP] retry safeSetSource failed for "${id}":`, e);
+        }
+      });
     }
   } catch (err) {
     console.error(`[MAP] Error setting data for source "${id}":`, err);
@@ -355,6 +414,13 @@ export const MapContainer: React.FC<MapContainerProps> = ({
 
   const interventionsRef = useRef<CandidateInterventionFeature[]>(interventions);
   interventionsRef.current = interventions;
+
+  // Stale-callback fix: store callbacks in refs and read inside handlers
+  const onDrawingProgressRef = useRef(onDrawingProgress);
+  onDrawingProgressRef.current = onDrawingProgress;
+
+  const onSelectFeatureRef = useRef(onSelectFeature);
+  onSelectFeatureRef.current = onSelectFeature;
 
   const drawingPointsRef = useRef<LngLat[]>([]);
   const drawingActiveRef = useRef(false);
@@ -670,26 +736,37 @@ export const MapContainer: React.FC<MapContainerProps> = ({
     if (onPolygonDrawn) onPolygonDrawn(newPolygon);
   }, [locationName, onPolygonDrawn]);
 
-  // ─── Map Click Handler (Drawing clicks) ─────────────────────────────────────
+  // ─── Map Click Handler (Drawing clicks & tap-to-close) ──────────────────────
   const handleMapClick = useCallback((e: maplibregl.MapMouseEvent) => {
     if (!drawingActiveRef.current) return;
+    const pts = drawingPointsRef.current;
+    const map = mapRef.current;
+
+    // Tap first vertex (< 14px screen distance) with >= 3 points to close polygon
+    if (pts.length >= 3 && map) {
+      const firstScreenPt = map.project(toLngLatCoord(pts[0]) as any);
+      const clickScreenPt = e.point;
+      const dist = Math.hypot(firstScreenPt.x - clickScreenPt.x, firstScreenPt.y - clickScreenPt.y);
+      if (dist < 14) {
+        finishDrawing();
+        return;
+      }
+    }
+
     const pt: LngLat = [Number(e.lngLat.lng.toFixed(6)), Number(e.lngLat.lat.toFixed(6))];
     drawingPointsRef.current.push(pt);
     const count = drawingPointsRef.current.length;
     setDrawingPointCount(count);
 
-    if (onDrawingProgress) {
-      onDrawingProgress(count, [...drawingPointsRef.current]);
-    }
+    onDrawingProgressRef.current?.(count, [...drawingPointsRef.current]);
 
     console.log('[DRAW] coordinate received:', { lng: pt[0], lat: pt[1] });
     console.log('[DRAW] vertex count:', count);
 
-    const map = mapRef.current;
     if (map) {
       renderDrawingPreview(map, [...drawingPointsRef.current]);
     }
-  }, [renderDrawingPreview, onDrawingProgress]);
+  }, [finishDrawing, renderDrawingPreview]);
 
   // ─── Drawing triggers from external buttons ────────────────────────────────
   useEffect(() => {
@@ -784,10 +861,14 @@ export const MapContainer: React.FC<MapContainerProps> = ({
     // Click handler for drawing
     map.on('click', handleMapClick);
 
-    // Click handler for intervention inspection
+    // Click handler for intervention inspection — calls parent onSelectFeature
     const onIntClick = (e: maplibregl.MapLayerMouseEvent) => {
       if (drawingActiveRef.current) return;
-      if (e.features?.length) setSelectedFeatureInfo(e.features[0].properties);
+      if (e.features?.length) {
+        const props = e.features[0].properties;
+        setSelectedFeatureInfo(props);
+        onSelectFeatureRef.current?.(props);
+      }
     };
     map.on('click', 'intervention-poly-fill', onIntClick);
     map.on('click', 'intervention-lines', onIntClick);
@@ -809,6 +890,10 @@ export const MapContainer: React.FC<MapContainerProps> = ({
 
     map.on('load', () => {
       mapReadyRef.current = true;
+      // Expose window.__map in development only
+      if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
+        (window as any).__map = map;
+      }
       updateLocationMarker(map, center);
       restoreApplicationLayers(map);
       console.log('[MAP] Map load event fired. Initial layers and sources restored.');
@@ -822,6 +907,9 @@ export const MapContainer: React.FC<MapContainerProps> = ({
     });
 
     return () => {
+      if (typeof window !== 'undefined' && (window as any).__map === map) {
+        delete (window as any).__map;
+      }
       if (locationMarkerRef.current) locationMarkerRef.current.remove();
       map.remove();
       mapRef.current = null;
@@ -830,13 +918,18 @@ export const MapContainer: React.FC<MapContainerProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ─── Basemap style switcher without destroying map instance ───────────────
+  // ─── Basemap style switcher by toggling visibility (No setStyle()!) ───────
   const handleStyleChange = useCallback((newType: MapStyleType) => {
     setMapStyleType(newType);
     const map = mapRef.current;
-    if (!map) return;
-    map.setStyle(buildMapStyle(newType));
-  }, []);
+    if (map) {
+      setBasemapVisibility(map, newType);
+    }
+    if (splitMapRef.current) {
+      setBasemapVisibility(splitMapRef.current, newType);
+    }
+    if (onMapStyleChanged) onMapStyleChanged(newType);
+  }, [onMapStyleChanged]);
 
   // ─── Center / Zoom changes ─────────────────────────────────────────────────
   useEffect(() => {
@@ -846,52 +939,9 @@ export const MapContainer: React.FC<MapContainerProps> = ({
     updateLocationMarker(map, center);
   }, [center, zoom, updateLocationMarker]);
 
-  // ─── Reactive Site Polygon Sync ────────────────────────────────────────────
+  // ─── Unified Reactive Push: sitePolygon, drawing, active plan ─────────────
   useEffect(() => {
     sitePolygonRef.current = sitePolygon;
-    const map = mapRef.current;
-    if (!map) return;
-
-    const emptyFC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
-
-    if (sitePolygon) {
-      safeSetSource(map, 'selected-site', sitePolygon as any);
-
-      if (sitePolygon.geometry?.coordinates?.[0]) {
-        const ring = sitePolygon.geometry.coordinates[0];
-        const cornerFeatures: GeoJSON.Feature[] = ring.slice(0, -1).map((coord: any, idx: number) => ({
-          type: 'Feature',
-          geometry: { type: 'Point', coordinates: toLngLatCoord(coord) },
-          properties: { idx }
-        }));
-        safeSetSource(map, 'selected-site-points', {
-          type: 'FeatureCollection',
-          features: cornerFeatures
-        });
-      }
-
-      // Delay fitBounds by 1800ms so it fires AFTER the center flyTo (1600ms) completes.
-      // Without this delay, flyTo overrides fitBounds and the polygon goes off-screen.
-      try {
-        const bbox = turf.bbox(sitePolygon);
-        setTimeout(() => {
-          const m = mapRef.current;
-          if (!m) return;
-          m.fitBounds(
-            [[bbox[0], bbox[1]], [bbox[2], bbox[3]]],
-            { padding: 100, duration: 800, maxZoom: 17 }
-          );
-        }, 1800);
-      } catch (e) {}
-    } else {
-      safeSetSource(map, 'selected-site', emptyFC);
-      safeSetSource(map, 'selected-site-points', emptyFC);
-    }
-  }, [sitePolygon]);
-
-
-  // ─── Reactive Interventions & Before/After Slider Sync ─────────────────────
-  useEffect(() => {
     interventionsRef.current = interventions;
     beforeAfterSplitRef.current = beforeAfterSplit;
     showInterventionsRef.current = showInterventions;
@@ -901,7 +951,22 @@ export const MapContainer: React.FC<MapContainerProps> = ({
     if (!map) return;
 
     restoreApplicationLayers(map);
-  }, [interventions, showInterventions, beforeAfterSplit, hiddenTypes, restoreApplicationLayers]);
+
+    if (sitePolygon) {
+      try {
+        const bbox = turf.bbox(sitePolygon);
+        const timer = setTimeout(() => {
+          const m = mapRef.current;
+          if (!m) return;
+          m.fitBounds(
+            [[bbox[0], bbox[1]], [bbox[2], bbox[3]]],
+            { padding: 100, duration: 800, maxZoom: 17 }
+          );
+        }, 1200);
+        return () => clearTimeout(timer);
+      } catch (e) {}
+    }
+  }, [sitePolygon, interventions, drawingPointCount, showInterventions, beforeAfterSplit, hiddenTypes, restoreApplicationLayers]);
 
   // ─── External Controls Synchronization ─────────────────────────────────────
   useEffect(() => {

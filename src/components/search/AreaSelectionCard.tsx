@@ -3,6 +3,7 @@
 import React from 'react';
 import { Sparkles, RefreshCw, ArrowLeft, CheckCircle2, Loader2, BarChart2, ShieldCheck } from 'lucide-react';
 import { SelectedLocation, SelectedAnalysisArea } from '@/types/geo';
+import { siteStats } from '@/lib/geo/impact';
 
 interface AreaSelectionCardProps {
   location: SelectedLocation;
@@ -24,9 +25,10 @@ export const AreaSelectionCard: React.FC<AreaSelectionCardProps> = ({
   className = ''
 }) => {
   const props = area.polygon.properties;
-  const hectares = props?.areaHectares ? props.areaHectares.toFixed(1) : '—';
-  const perimeter = props?.perimeterMeters ? Math.round(props.perimeterMeters).toLocaleString() : '—';
-  const sqMeters = props?.areaSquareMeters ? Math.round(props.areaSquareMeters).toLocaleString() : '—';
+  const stats = area?.polygon ? siteStats(area.polygon as any) : null;
+  const hectares = stats ? stats.areaHa.toFixed(1) : (props?.areaHectares ? props.areaHectares.toFixed(1) : '—');
+  const perimeter = stats ? Math.round(stats.perimKm * 1000).toLocaleString() : (props?.perimeterMeters ? Math.round(props.perimeterMeters).toLocaleString() : '—');
+  const sqMeters = stats ? Math.round(stats.areaM2).toLocaleString() : (props?.areaSquareMeters ? Math.round(props.areaSquareMeters).toLocaleString() : '—');
 
   return (
     <div className={`floating-glass-card p-5 max-w-md w-full animate-slide-up mobile-bottom-sheet ${className}`}>

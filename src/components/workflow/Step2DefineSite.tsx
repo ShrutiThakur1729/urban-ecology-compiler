@@ -12,7 +12,7 @@ import {
   Check
 } from 'lucide-react';
 import { SelectedLocation, SelectedAnalysisArea } from '@/types/geo';
-import { computePolygonStats } from '@/lib/geo/geometryUtils';
+import { siteStats, normalizeSite } from '@/lib/geo/impact';
 
 interface Step2DefineSiteProps {
   location: SelectedLocation;
@@ -41,11 +41,11 @@ export const Step2DefineSite: React.FC<Step2DefineSiteProps> = ({
   onUndoPoint,
   onConfirmSite
 }) => {
-  const polygon = analysisArea?.polygon;
-  const stats = polygon ? computePolygonStats(polygon) : null;
-  const areaHa = stats ? stats.areaHectares.toFixed(2) : (polygon?.properties?.areaHectares ? polygon.properties.areaHectares.toFixed(2) : '0.00');
-  const perimeterKm = stats ? stats.perimeterKilometers.toFixed(2) : (polygon?.properties?.perimeterMeters ? (polygon.properties.perimeterMeters / 1000).toFixed(2) : '0.00');
-  const vertexCount = stats ? stats.vertexCount : (polygon?.geometry?.coordinates?.[0]?.length ? polygon.geometry.coordinates[0].length - 1 : 0);
+  const siteFeature = normalizeSite(analysisArea?.polygon);
+  const stats = siteStats(siteFeature);
+  const areaHa = stats ? stats.areaHa.toFixed(2) : '0.00';
+  const perimeterKm = stats ? stats.perimKm.toFixed(2) : '0.00';
+  const vertexCount = stats ? stats.vertices : 0;
 
   return (
     <>

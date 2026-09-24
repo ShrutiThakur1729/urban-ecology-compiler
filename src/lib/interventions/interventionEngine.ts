@@ -49,6 +49,7 @@ export class InterventionEngine {
       name: 'Topographic Catchment Rain Garden',
       geometry: clipPolygonToSite(rgRawCoords, polygon),
       properties: {
+        type: 'rain_garden',
         areaSqMeters: Math.round(analysis.siteAreaSquareMeters * 0.055),
         estimatedCostInr: Math.round(analysis.siteAreaSquareMeters * 0.055 * INTERVENTION_REGISTRY.rain_garden.unitCostInr),
         runoffInterceptionLiters: Math.round(analysis.siteAreaSquareMeters * 0.055 * 50),
@@ -74,6 +75,7 @@ export class InterventionEngine {
         ]
       },
       properties: {
+        type: 'bioswale',
         areaSqMeters: Math.round(analysis.siteAreaSquareMeters * 0.025),
         lengthMeters: Math.round(turf.length(turf.lineString([
           [cLng - width * 0.28, cLat - height * 0.08],
@@ -106,6 +108,7 @@ export class InterventionEngine {
         ]
       },
       properties: {
+        type: 'tree_corridor',
         areaSqMeters: Math.round(analysis.siteAreaSquareMeters * 0.038),
         lengthMeters: 1200,
         estimatedCostInr: Math.round(analysis.siteAreaSquareMeters * 0.038 * INTERVENTION_REGISTRY.tree_corridor.unitCostInr),
@@ -137,6 +140,7 @@ export class InterventionEngine {
       name: 'High-Density Miyawaki Native Forest',
       geometry: clipPolygonToSite(pfRawCoords, polygon),
       properties: {
+        type: 'miyawaki',
         areaSqMeters: Math.round(analysis.siteAreaSquareMeters * 0.06),
         estimatedCostInr: Math.round(analysis.siteAreaSquareMeters * 0.06 * INTERVENTION_REGISTRY.pocket_forest.unitCostInr),
         runoffInterceptionLiters: Math.round(analysis.siteAreaSquareMeters * 0.06 * 30),
@@ -167,6 +171,7 @@ export class InterventionEngine {
       name: 'Institutional Rooftop Cooling Blanket',
       geometry: clipPolygonToSite(grRawCoords, polygon),
       properties: {
+        type: 'green_roof',
         areaSqMeters: Math.round(analysis.siteAreaSquareMeters * 0.035),
         estimatedCostInr: Math.round(analysis.siteAreaSquareMeters * 0.035 * INTERVENTION_REGISTRY.green_roof.unitCostInr),
         runoffInterceptionLiters: Math.round(analysis.siteAreaSquareMeters * 0.035 * 40),
@@ -197,6 +202,7 @@ export class InterventionEngine {
       name: 'Commercial Parking Permeable Surface',
       geometry: clipPolygonToSite(ppRawCoords, polygon),
       properties: {
+        type: 'permeable_pavement',
         areaSqMeters: Math.round(analysis.siteAreaSquareMeters * 0.04),
         estimatedCostInr: Math.round(analysis.siteAreaSquareMeters * 0.04 * INTERVENTION_REGISTRY.permeable_pavement.unitCostInr),
         runoffInterceptionLiters: Math.round(analysis.siteAreaSquareMeters * 0.04 * 40),
@@ -227,6 +233,7 @@ export class InterventionEngine {
       name: 'Central Flora & Pollinator Sanctuary',
       geometry: clipPolygonToSite(polRawCoords, polygon),
       properties: {
+        type: 'pollinator_garden',
         areaSqMeters: Math.round(analysis.siteAreaSquareMeters * 0.025),
         estimatedCostInr: Math.round(analysis.siteAreaSquareMeters * 0.025 * INTERVENTION_REGISTRY.pollinator_garden.unitCostInr),
         runoffInterceptionLiters: Math.round(analysis.siteAreaSquareMeters * 0.025 * 20),

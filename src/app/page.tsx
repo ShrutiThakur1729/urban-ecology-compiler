@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { Header, MapStyleType } from '@/components/layout/Header';
 import { LandingPage } from '@/components/landing/LandingPage';
@@ -15,6 +15,7 @@ import { BeforeAfterSplit, ComparisonMode } from '@/components/workflow/BeforeAf
 import { LocationSearchModal } from '@/components/search/LocationSearchModal';
 import { DataProvenanceModal } from '@/components/analysis/DataProvenanceModal';
 import { ProjectLibraryModal } from '@/components/project/ProjectLibraryModal';
+import { toFeatures, normalizeSite } from '@/lib/geo/impact';
 
 const MapContainer = dynamic(
   () => import('@/components/map/MapContainer').then((mod) => mod.MapContainer),
@@ -139,7 +140,7 @@ export default function UrbanCompilerPage() {
   const [inspectedMetric, setInspectedMetric] = useState<MetricWithProvenance<any> | null>(null);
 
   // Active interventions for current scenario
-  const activeInterventions: CandidateInterventionFeature[] = optimizationResult
+  const rawInterventions = optimizationResult
     ? activeScenarioType === 'FLOOD_FIRST'
       ? optimizationResult.scenarios.floodFirst.interventions
       : activeScenarioType === 'BIODIVERSITY_FIRST'
@@ -147,12 +148,18 @@ export default function UrbanCompilerPage() {
       : optimizationResult.scenarios.balanced.interventions
     : [];
 
+  const interventionFeatures = useMemo(() => toFeatures(rawInterventions), [rawInterventions]);
+  const siteFeature = useMemo(
+    () => normalizeSite(selectedAnalysisArea?.polygon || (currentStep === 4 ? THANE_DEMO_SITE_POLYGON : selectedAnalysisArea?.polygon)),
+    [selectedAnalysisArea?.polygon, currentStep]
+  );
+
   // Default selected intervention to first intervention if none selected
   useEffect(() => {
-    if (activeInterventions.length > 0 && !selectedIntervention) {
-      setSelectedIntervention(activeInterventions[0]);
+    if (interventionFeatures.length > 0 && !selectedIntervention) {
+      setSelectedIntervention(interventionFeatures[0] as any);
     }
-  }, [activeInterventions, selectedIntervention]);
+  }, [interventionFeatures, selectedIntervention]);
 
   // ───────────────────────────────────────────────────────────────────────────
   // Unified Project State Object (Single Source of Truth)
@@ -564,8 +571,8 @@ export default function UrbanCompilerPage() {
             center={selectedLocation?.center || [72.9781, 19.2183]}
             zoom={selectedLocation?.zoom || 14}
             locationName={selectedLocation?.name}
-            sitePolygon={selectedAnalysisArea?.polygon || null}
-            interventions={activeInterventions}
+            sitePolygon={siteFeature as any}
+            interventions={interventionFeatures as any}
             activeScenarioTitle={
               optimizationResult
                 ? activeScenarioType === 'FLOOD_FIRST'
@@ -593,10 +600,10 @@ export default function UrbanCompilerPage() {
             }
             highlightedInterventionId={selectedIntervention?.id || null}
             onSelectFeature={(props) => {
-              const match = activeInterventions.find(
-                (i) => i.id === props?.id || i.name === props?.name || (i.interventionId as string) === props?.id
+              const match = interventionFeatures.find(
+                (i: any) => i.id === props?.id || i.properties?.id === props?.id || i.properties?.name === props?.name || i.name === props?.name
               );
-              if (match) setSelectedIntervention(match);
+              if (match) setSelectedIntervention(match as any);
             }}
             onDrawingProgress={(count, pts) => {
               setDrawingPointCount(count);
@@ -605,7 +612,7 @@ export default function UrbanCompilerPage() {
             triggerFinishDrawing={triggerFinishDrawing}
             triggerCancelDrawing={triggerCancelDrawing}
             triggerUndoDrawingPoint={triggerUndoDrawingPoint}
-            comparisonMode={comparisonMode}
+            comparisonMode={currentStep === 4 ? comparisonMode : 'after'}
           />
 
           {/* ── EXPAND MAP FLOATING TOOLBAR ── */}
@@ -678,8 +685,8 @@ export default function UrbanCompilerPage() {
             <Step4Compiling
               onComplete={() => {
                 setIsCompilingScreenActive(false);
-                if (activeInterventions.length > 0 && !selectedIntervention) {
-                  setSelectedIntervention(activeInterventions[0]);
+                if (interventionFeatures.length > 0 && !selectedIntervention) {
+                  setSelectedIntervention(interventionFeatures[0] as any);
                 }
               }}
             />
@@ -758,13 +765,14 @@ export default function UrbanCompilerPage() {
                     setSelectedIntervention(newScenario.interventions[0]);
                   }
                 }}
-                interventions={activeInterventions}
-                selectedIntervention={selectedIntervention || activeInterventions[0] || null}
+                interventions={interventionFeatures as any}
+                selectedIntervention={selectedIntervention || (interventionFeatures[0] as any) || null}
                 onSelectIntervention={setSelectedIntervention}
                 onOpenProvenance={() => {
                   setInspectedMetric(null);
                   setIsProvenanceOpen(true);
                 }}
+                sitePolygon={siteFeature as any}
                 className="w-full"
               />
             </div>
@@ -815,8 +823,8 @@ export default function UrbanCompilerPage() {
                     setSelectedIntervention(newScenario.interventions[0]);
                   }
                 }}
-                interventions={activeInterventions}
-                selectedIntervention={selectedIntervention || activeInterventions[0] || null}
+                interventions={interventionFeatures as any}
+                selectedIntervention={selectedIntervention || (interventionFeatures[0] as any) || null}
                 onSelectIntervention={(inv) => {
                   setSelectedIntervention(inv);
                   setIsMobileResultsOpen(false); // Close drawer to view on map
@@ -825,6 +833,7 @@ export default function UrbanCompilerPage() {
                   setInspectedMetric(null);
                   setIsProvenanceOpen(true);
                 }}
+                sitePolygon={siteFeature as any}
                 className="w-full border-l-0"
               />
             </div>

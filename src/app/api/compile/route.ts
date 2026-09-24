@@ -5,6 +5,8 @@ import { ScenarioOptimizer } from '@/lib/optimizer/scenarioOptimizer';
 import { SitePolygon } from '@/types/geo';
 import { SiteAnalysisData } from '@/types/analysis';
 import { THANE_DEMO_SITE_POLYGON, THANE_DEMO_ANALYSIS, THANE_DEMO_OPTIMIZED_SCENARIOS } from '@/lib/demo/demoData';
+import { toFeatures } from '@/lib/geo/impact';
+import * as turf from '@turf/turf';
 
 export async function POST(req: NextRequest) {
   try {
@@ -27,14 +29,44 @@ export async function POST(req: NextRequest) {
     // 3. Multi-objective scenario optimization
     const optimizationResult = ScenarioOptimizer.optimize(analysis, candidates, compiledPlan);
 
+    // 4. Ensure real GeoJSON Features with properties.type and [lng, lat]
+    const validatedCandidates = toFeatures(candidates);
+    for (const f of validatedCandidates) {
+      try {
+        const centroid = turf.centroid(f as any);
+        if (!turf.booleanPointInPolygon(centroid, polygon as any)) {
+          console.warn('[compile] intervention feature centroid outside site boundary:', f.properties?.name || f.id);
+        }
+      } catch {
+        // silent
+      }
+    }
+
+    for (const key of ['balanced', 'floodFirst', 'biodiversityFirst'] as const) {
+      if (optimizationResult.scenarios[key]?.interventions) {
+        optimizationResult.scenarios[key].interventions = toFeatures(
+          optimizationResult.scenarios[key].interventions
+        );
+      }
+    }
+
     return NextResponse.json({
       success: true,
       compiledPlan,
-      candidates,
+      candidates: validatedCandidates,
       optimizationResult
     });
   } catch (err: any) {
     console.error('Compiler API route error:', err);
+    const validatedDemo = JSON.parse(JSON.stringify(THANE_DEMO_OPTIMIZED_SCENARIOS));
+    for (const key of ['balanced', 'floodFirst', 'biodiversityFirst'] as const) {
+      if (validatedDemo.scenarios[key]?.interventions) {
+        validatedDemo.scenarios[key].interventions = toFeatures(
+          validatedDemo.scenarios[key].interventions
+        );
+      }
+    }
+
     return NextResponse.json({
       success: true,
       compiledPlan: {
@@ -48,7 +80,7 @@ export async function POST(req: NextRequest) {
         parsedSummary: 'Prioritizing flood reduction followed by heat island cooling and biodiversity.',
         tradeoffAnalysis: 'Optimal budget allocation across bioswales and pocket forests.'
       },
-      optimizationResult: THANE_DEMO_OPTIMIZED_SCENARIOS
+      optimizationResult: validatedDemo
     });
   }
 }

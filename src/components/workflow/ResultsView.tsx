@@ -10,17 +10,13 @@ import {
   Sparkles,
   TreePine,
   Droplets,
-  ThermometerSnowflake,
-  ShieldAlert,
-  ArrowRight,
   Database,
-  ExternalLink,
-  Columns2,
-  Info,
-  DollarSign
+  Columns2
 } from 'lucide-react';
 import { OptimizationResult, ScenarioType } from '@/types/scenarios';
 import { CandidateInterventionFeature } from '@/types/interventions';
+import { SitePolygon } from '@/types/geo';
+import { computeImpact, fmtHa, fmtINR } from '@/lib/geo/impact';
 
 interface ResultsViewProps {
   optimizationResult: OptimizationResult | null;
@@ -32,6 +28,7 @@ interface ResultsViewProps {
   onOpenProvenance: () => void;
   onToggleCompare: () => void;
   isCompareActive: boolean;
+  sitePolygon?: SitePolygon | null;
 }
 
 export const ResultsView: React.FC<ResultsViewProps> = ({
@@ -43,7 +40,8 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
   selectedInterventionId,
   onOpenProvenance,
   onToggleCompare,
-  isCompareActive
+  isCompareActive,
+  sitePolygon
 }) => {
   const [isPanelOpen, setIsPanelOpen] = useState(true);
   const [showAllInterventions, setShowAllInterventions] = useState(true);
@@ -82,40 +80,43 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
       : optimizationResult.scenarios.balanced
     : null;
 
-  // Impact metrics
+  // Real geometry-derived impact
+  const impact = sitePolygon ? computeImpact(sitePolygon as any, interventions as any) : null;
+
+  // Impact metrics cards
   const impactMetrics = [
     {
       label: 'Green Cover',
-      value: '+3.8 ha',
+      value: impact ? fmtHa(impact.greenCoverHa) : '+3.8 ha',
       sub: 'Canopy & forest expansion',
       color: 'text-emerald-700',
       bg: 'bg-emerald-50'
     },
     {
       label: 'Surface Temp',
-      value: '-2.1°C',
+      value: impact ? `${impact.surfaceCoolingC.toFixed(1)}°C` : '-2.1°C',
       sub: 'Urban heat island reduction',
       color: 'text-amber-700',
       bg: 'bg-amber-50'
     },
     {
-      label: 'Stormwater Absorption',
-      value: '+45%',
-      sub: 'Runoff captured by bioswales',
+      label: 'Stormwater',
+      value: impact ? `${impact.runoffReductionPct.toFixed(0)}% (${Math.round(impact.storageM3)} m³)` : '+45% (120 m³)',
+      sub: 'Runoff reduction & detention',
       color: 'text-sky-700',
       bg: 'bg-sky-50'
     },
     {
-      label: 'Biodiversity Potential',
-      value: '+26%',
-      sub: 'Pollinator stepping stones',
+      label: 'Habitat Share',
+      value: impact ? `${impact.habitatSharePct.toFixed(1)}%` : '18.4%',
+      sub: 'Of site area as ecological habitat',
       color: 'text-teal-700',
       bg: 'bg-teal-50'
     },
     {
-      label: 'Estimated Cost',
-      value: activeScenarioObj ? `₹${(activeScenarioObj.totalCostInr / 100000).toFixed(1)} lakh` : '₹44.8 lakh',
-      sub: 'Public works allocation',
+      label: 'Est. Cost',
+      value: impact ? fmtINR(impact.costINR) : (activeScenarioObj ? `₹${(activeScenarioObj.totalCostInr / 100000).toFixed(1)} lakh` : '₹44.8 lakh'),
+      sub: 'Modeled public works allocation',
       color: 'text-slate-900',
       bg: 'bg-slate-50'
     }
@@ -123,7 +124,7 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
 
   return (
     <>
-      {/* ── Top Scenario Selector Bar (Matching Panel 7 in Reference) ── */}
+      {/* ── Top Scenario Selector Bar ── */}
       <div className="absolute top-4 left-4 right-4 sm:left-1/2 sm:-translate-x-1/2 sm:w-auto z-30 pointer-events-auto">
         <div className="bg-white/95 backdrop-blur-xl rounded-2xl border border-slate-200/90 shadow-xl p-1.5 flex items-center gap-1.5 flex-wrap justify-center">
           {scenarios.map((sc) => {
@@ -158,7 +159,6 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
             );
           })}
 
-          {/* Quick Comparison Toggle Button */}
           <div className="h-5 w-px bg-slate-200 mx-1 hidden sm:block" />
 
           <button
@@ -176,10 +176,9 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
         </div>
       </div>
 
-      {/* ── Collapsible Interventions Panel on Right (Matching Panel 7 in Reference) ── */}
+      {/* ── Collapsible Interventions Panel on Right ── */}
       <div className="absolute top-20 right-4 sm:right-6 w-80 sm:w-96 max-h-[calc(100vh-210px)] z-30 pointer-events-auto flex flex-col animate-slide-up">
         <div className="bg-white/95 backdrop-blur-xl rounded-2xl border border-slate-200/90 shadow-2xl overflow-hidden flex flex-col">
-          {/* Panel Header */}
           <div className="p-4 border-b border-slate-100 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <div className="p-1.5 rounded-lg bg-emerald-100 text-emerald-800">
@@ -214,6 +213,23 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
               </button>
             </div>
           </div>
+
+          {/* Breakdown by type */}
+          {impact && impact.breakdown.length > 0 && (
+            <div className="p-3 bg-slate-50/80 border-b border-slate-100 space-y-1">
+              <div className="text-[10px] font-mono font-bold text-slate-500 uppercase tracking-wider">
+                Type Breakdown
+              </div>
+              <div className="grid grid-cols-1 gap-1">
+                {impact.breakdown.map((b) => (
+                  <div key={b.type} className="flex items-center justify-between text-xs px-2 py-1 rounded bg-white border border-slate-200">
+                    <span className="font-semibold text-slate-700">{b.label} <span className="text-[10px] text-slate-500 font-mono">×{b.count}</span></span>
+                    <span className="font-mono font-bold text-emerald-800">{b.areaHa > 0 ? fmtHa(b.areaHa) : `${b.lengthKm.toFixed(2)} km`}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Intervention Cards List */}
           {isPanelOpen && (
@@ -268,12 +284,6 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
                           </span>
                         )}
                       </div>
-
-                      {inv.properties?.suitabilityReason && (
-                        <p className="text-[10px] text-slate-600 mt-1 line-clamp-1 italic">
-                          "{inv.properties.suitabilityReason}"
-                        </p>
-                      )}
                     </div>
                   </button>
                 );
@@ -283,7 +293,7 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
         </div>
       </div>
 
-      {/* ── Impact Summary (Modeled Estimates) Floating Bar (Matching Reference Panel 7) ── */}
+      {/* ── Impact Summary (Modeled Estimates) Floating Bar ── */}
       <div className="absolute bottom-4 left-4 right-4 sm:left-6 sm:right-auto sm:max-w-4xl z-20 pointer-events-auto animate-slide-up">
         <div className="bg-white/95 backdrop-blur-xl rounded-2xl border border-slate-200/90 shadow-2xl p-4 sm:p-5">
           <div className="flex items-center justify-between pb-2 mb-3 border-b border-slate-100">
@@ -291,9 +301,21 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
               <span className="text-xs font-bold text-slate-900">
                 Impact Summary
               </span>
-              <span className="text-[10px] font-mono text-emerald-800 bg-emerald-100/70 px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">
-                Modeled Estimates
+              <span
+                className="text-[10px] font-mono text-emerald-800 bg-emerald-100/70 px-2 py-0.5 rounded-full font-bold uppercase tracking-wider cursor-help"
+                title={
+                  impact
+                    ? `Baseline Runoff C: ${impact.assumptions.baselineRunoffC}\nDesign Storm: ${impact.assumptions.designStormMm} mm\nCooling: ${impact.assumptions.coolingCPerFraction}°C per 1.0 canopy fraction\nCooling Cap: ${impact.assumptions.coolingCapC}°C`
+                    : 'Modeled estimates based on rational method and empirical canopy cooling'
+                }
+              >
+                Modeled estimates
               </span>
+              {impact && impact.unclassified > 0 && (
+                <span className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded">
+                  ⚠️ {impact.unclassified} feature{impact.unclassified > 1 ? 's' : ''} had an unknown type
+                </span>
+              )}
             </div>
 
             <button

@@ -46,14 +46,14 @@ export async function POST(req: NextRequest) {
       if (optimizationResult.scenarios[key]?.interventions) {
         optimizationResult.scenarios[key].interventions = toFeatures(
           optimizationResult.scenarios[key].interventions
-        );
+        ) as any;
       }
     }
 
     return NextResponse.json({
       success: true,
       compiledPlan,
-      candidates: validatedCandidates,
+      candidates: validatedCandidates as any,
       optimizationResult
     });
   } catch (err: any) {
@@ -63,7 +63,7 @@ export async function POST(req: NextRequest) {
       if (validatedDemo.scenarios[key]?.interventions) {
         validatedDemo.scenarios[key].interventions = toFeatures(
           validatedDemo.scenarios[key].interventions
-        );
+        ) as any;
       }
     }
 

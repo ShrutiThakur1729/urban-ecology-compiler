@@ -37,11 +37,13 @@ export interface CandidateInterventionFeature {
   id: string;
   interventionId: InterventionId;
   name: string;
+  type?: string;
   geometry: {
-    type: 'Polygon' | 'LineString' | 'Point';
+    type: 'Polygon' | 'LineString' | 'Point' | string;
     coordinates: any;
   };
   properties: {
+    type?: string;
     areaSqMeters: number;
     lengthMeters?: number;
     estimatedCostInr: number;
@@ -51,5 +53,7 @@ export interface CandidateInterventionFeature {
     feasibilityScore: number; // 0 to 1
     suitabilityReason: string;
     colorHex: string;
+    [key: string]: any;
   };
+  [key: string]: any;
 }

@@ -147,6 +147,7 @@ interface MapContainerProps {
   triggerCancelDrawing?: number;
   triggerUndoDrawingPoint?: number;
   comparisonMode?: 'before' | 'after' | 'split';
+  showInterventions?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -173,7 +174,8 @@ export const MapContainer: React.FC<MapContainerProps> = ({
   triggerFinishDrawing,
   triggerCancelDrawing,
   triggerUndoDrawingPoint,
-  comparisonMode = 'after'
+  comparisonMode = 'split',
+  showInterventions = true
 }) => {
   const rootWrapperRef = useRef<HTMLDivElement>(null);
   const mapContainerRef = useRef<HTMLDivElement>(null);
@@ -492,6 +494,7 @@ export const MapContainer: React.FC<MapContainerProps> = ({
         draft={drawingPoints}
         site={sitePolygon as any}
         interventions={interventionFeatures as any}
+        showInterventions={showInterventions}
         drawing={isDrawing}
         onSelect={(f) => onSelectFeatureRef.current?.(f.properties ?? {})}
       />

@@ -15,7 +15,8 @@ import { BeforeAfterSplit, ComparisonMode } from '@/components/workflow/BeforeAf
 import { LocationSearchModal } from '@/components/search/LocationSearchModal';
 import { DataProvenanceModal } from '@/components/analysis/DataProvenanceModal';
 import { ProjectLibraryModal } from '@/components/project/ProjectLibraryModal';
-import { toFeatures, normalizeSite } from '@/lib/geo/impact';
+import { toFeatures, normalizeSite, computeImpact } from '@/lib/geo/impact';
+import { ImpactCards } from '@/components/results/ImpactCards';
 
 const MapContainer = dynamic(
   () => import('@/components/map/MapContainer').then((mod) => mod.MapContainer),
@@ -131,6 +132,8 @@ export default function UrbanCompilerPage() {
   // ── 8. Before / After Comparison State ──
   const [comparisonMode, setComparisonMode] = useState<ComparisonMode>('split');
   const [beforeAfterSplit, setBeforeAfterSplit] = useState<number>(50);
+  const [isComparisonOpen, setIsComparisonOpen] = useState(true);
+  const [showInterventions, setShowInterventions] = useState(true);
 
   // ── 9. Modals ──
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -565,160 +568,186 @@ export default function UrbanCompilerPage() {
         )}
 
         {/* ── 2. CENTER: Large Interactive Map Canvas ── */}
-        <main className="flex-1 h-full relative z-0 overflow-hidden">
-          {/* MapLibre Canvas - Pure Map without old HUDs */}
-          <MapContainer
-            center={selectedLocation?.center || [72.9781, 19.2183]}
-            zoom={selectedLocation?.zoom || 14}
-            locationName={selectedLocation?.name}
-            sitePolygon={siteFeature as any}
-            interventions={interventionFeatures as any}
-            activeScenarioTitle={
-              optimizationResult
-                ? activeScenarioType === 'FLOOD_FIRST'
-                  ? optimizationResult.scenarios.floodFirst.title
-                  : activeScenarioType === 'BIODIVERSITY_FIRST'
-                  ? optimizationResult.scenarios.biodiversityFirst.title
-                  : optimizationResult.scenarios.balanced.title
-                : undefined
-            }
-            isAnalyzing={isAnalyzing}
-            appPhase={appPhase}
-            onPolygonDrawn={handlePolygonDrawn}
-            onCancelDrawing={() => {
-              setIsDrawing(false);
-              setAppPhase('AREA_READY');
-            }}
-            externalMapStyle={mapStyle}
-            onMapStyleChanged={setMapStyle}
-            externalBeforeAfterSplit={
-              comparisonMode === 'before'
-                ? 0
-                : comparisonMode === 'after'
-                ? 100
-                : beforeAfterSplit
-            }
-            highlightedInterventionId={selectedIntervention?.id || null}
-            onSelectFeature={(props) => {
-              const match = interventionFeatures.find(
-                (i: any) => i.id === props?.id || i.properties?.id === props?.id || i.properties?.name === props?.name || i.name === props?.name
-              );
-              if (match) setSelectedIntervention(match as any);
-            }}
-            onDrawingProgress={(count, pts) => {
-              setDrawingPointCount(count);
-              setDrawingPoints(pts);
-            }}
-            triggerFinishDrawing={triggerFinishDrawing}
-            triggerCancelDrawing={triggerCancelDrawing}
-            triggerUndoDrawingPoint={triggerUndoDrawingPoint}
-            comparisonMode={currentStep === 4 ? comparisonMode : 'after'}
-          />
-
-          {/* ── EXPAND MAP FLOATING TOOLBAR ── */}
-          <div className="absolute top-3 left-3 sm:top-4 sm:left-4 z-30 pointer-events-auto flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setIsMapExpanded(!isMapExpanded)}
-              className="px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-2xl bg-white/95 backdrop-blur-md border border-slate-200/90 shadow-lg text-[11px] sm:text-xs font-bold text-slate-800 hover:text-emerald-900 hover:border-emerald-400 transition flex items-center gap-1.5"
-              title={isMapExpanded ? 'Exit Full Map Mode' : 'Expand Map across workspace'}
-            >
-              {isMapExpanded ? (
-                <>
-                  <Minimize2 className="w-3.5 h-3.5 text-emerald-700" />
-                  <span className="hidden xs:inline">Exit Full Map</span>
-                </>
-              ) : (
-                <>
-                  <Maximize2 className="w-3.5 h-3.5 text-slate-600" />
-                  <span className="hidden sm:inline">Expand Map</span>
-                </>
-              )}
-            </button>
-          </div>
-
-          {/* ── STEP 1: LOCATION SEARCH ── */}
-          {currentStep === 1 && (
-            <Step1Location
-              selectedLocation={selectedLocation}
-              onSelectLocation={handleSelectLocation}
-              onConfirmLocation={handleConfirmLocation}
-              onLoadDemo={handleLoadDemoSite}
-            />
-          )}
-
-          {/* ── STEP 2: DEFINE SITE ── */}
-          {currentStep === 2 && selectedLocation && (
-            <Step2DefineSite
-              location={selectedLocation}
-              analysisArea={selectedAnalysisArea}
-              isDrawing={isDrawing}
-              drawingPointCount={drawingPointCount}
-              onUseSuggestedArea={handleUseSuggestedArea}
-              onStartDrawing={handleStartDrawing}
-              onFinishDrawing={() => {
-                setTriggerFinishDrawing((c) => c + 1);
-              }}
-              onUndoPoint={() => {
-                setTriggerUndoDrawingPoint((c) => c + 1);
-              }}
+        <main className="flex-1 h-full relative z-0 flex flex-col overflow-hidden">
+          <div className="flex-1 relative w-full h-full min-h-0 overflow-hidden">
+            {/* MapLibre Canvas - Pure Map without old HUDs */}
+            <MapContainer
+              center={selectedLocation?.center || [72.9781, 19.2183]}
+              zoom={selectedLocation?.zoom || 14}
+              locationName={selectedLocation?.name}
+              sitePolygon={siteFeature as any}
+              interventions={interventionFeatures as any}
+              showInterventions={showInterventions}
+              activeScenarioTitle={
+                optimizationResult
+                  ? activeScenarioType === 'FLOOD_FIRST'
+                    ? optimizationResult.scenarios.floodFirst.title
+                    : activeScenarioType === 'BIODIVERSITY_FIRST'
+                    ? optimizationResult.scenarios.biodiversityFirst.title
+                    : optimizationResult.scenarios.balanced.title
+                  : undefined
+              }
+              isAnalyzing={isAnalyzing}
+              appPhase={appPhase}
+              onPolygonDrawn={handlePolygonDrawn}
               onCancelDrawing={() => {
-                setTriggerCancelDrawing((c) => c + 1);
                 setIsDrawing(false);
                 setAppPhase('AREA_READY');
               }}
-              onClearArea={handleClearArea}
-              onConfirmSite={handleConfirmSite}
-            />
-          )}
-
-          {/* ── STEP 3: SET PRIORITIES ── */}
-          {currentStep === 3 && (
-            <Step3SetPriorities
-              onCompile={handleStartCompilation}
-              isCompiling={isCompiling}
-            />
-          )}
-
-          {/* ── STEP 4: COMPILING PROCESSING ANIMATION ── */}
-          {currentStep === 4 && isCompilingScreenActive && (
-            <Step4Compiling
-              onComplete={() => {
-                setIsCompilingScreenActive(false);
-                if (interventionFeatures.length > 0 && !selectedIntervention) {
-                  setSelectedIntervention(interventionFeatures[0] as any);
-                }
+              externalMapStyle={mapStyle}
+              onMapStyleChanged={setMapStyle}
+              externalBeforeAfterSplit={
+                comparisonMode === 'before'
+                  ? 0
+                  : comparisonMode === 'after'
+                  ? 100
+                  : beforeAfterSplit
+              }
+              highlightedInterventionId={selectedIntervention?.id || null}
+              onSelectFeature={(props) => {
+                const match = interventionFeatures.find(
+                  (i: any) => i.id === props?.id || i.properties?.id === props?.id || i.properties?.name === props?.name || i.name === props?.name
+                );
+                if (match) setSelectedIntervention(match as any);
               }}
-            />
-          )}
-
-          {/* ── STEP 4: BEFORE / AFTER MAP SPLIT CONTROLS ── */}
-          {currentStep === 4 && !isCompilingScreenActive && (
-            <BeforeAfterSplit
-              mode={comparisonMode}
-              onChangeMode={(m) => {
-                setComparisonMode(m);
-                if (m === 'before') setBeforeAfterSplit(0);
-                else if (m === 'after') setBeforeAfterSplit(100);
-                else setBeforeAfterSplit(50);
+              onDrawingProgress={(count, pts) => {
+                setDrawingPointCount(count);
+                setDrawingPoints(pts);
               }}
-              splitPercent={beforeAfterSplit}
-              onChangeSplitPercent={setBeforeAfterSplit}
+              triggerFinishDrawing={triggerFinishDrawing}
+              triggerCancelDrawing={triggerCancelDrawing}
+              triggerUndoDrawingPoint={triggerUndoDrawingPoint}
+              comparisonMode={currentStep === 4 ? comparisonMode : 'after'}
             />
-          )}
 
-          {/* ── Mobile Floating Results Toggle (Step 4) ── */}
-          {currentStep === 4 && !isCompilingScreenActive && (
-            <div className="lg:hidden absolute bottom-5 left-1/2 -translate-x-1/2 z-30 pointer-events-auto">
+            {/* ── EXPAND MAP FLOATING TOOLBAR ── */}
+            <div className="absolute top-3 left-3 sm:top-4 sm:left-4 z-30 pointer-events-auto flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => setIsMobileResultsOpen(true)}
-                className="px-4 py-2.5 rounded-full bg-emerald-800 hover:bg-emerald-900 text-white font-bold text-xs flex items-center gap-2 shadow-2xl border border-emerald-600/50 transition active:scale-95"
+                onClick={() => setIsMapExpanded(!isMapExpanded)}
+                className="px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-2xl bg-white/95 backdrop-blur-md border border-slate-200/90 shadow-lg text-[11px] sm:text-xs font-bold text-slate-800 hover:text-emerald-900 hover:border-emerald-400 transition flex items-center gap-1.5"
+                title={isMapExpanded ? 'Exit Full Map Mode' : 'Expand Map across workspace'}
               >
-                <Layers className="w-4 h-4 text-emerald-300" />
-                <span>View Plan & Scenarios</span>
-                <span className="px-1.5 py-0.5 rounded-full bg-emerald-700 text-[10px] font-mono">3</span>
+                {isMapExpanded ? (
+                  <>
+                    <Minimize2 className="w-3.5 h-3.5 text-emerald-700" />
+                    <span className="hidden xs:inline">Exit Full Map</span>
+                  </>
+                ) : (
+                  <>
+                    <Maximize2 className="w-3.5 h-3.5 text-slate-600" />
+                    <span className="hidden sm:inline">Expand Map</span>
+                  </>
+                )}
               </button>
+            </div>
+
+            {/* ── STEP 1: LOCATION SEARCH ── */}
+            {currentStep === 1 && (
+              <Step1Location
+                selectedLocation={selectedLocation}
+                onSelectLocation={handleSelectLocation}
+                onConfirmLocation={handleConfirmLocation}
+                onLoadDemo={handleLoadDemoSite}
+              />
+            )}
+
+            {/* ── STEP 2: DEFINE SITE ── */}
+            {currentStep === 2 && selectedLocation && (
+              <Step2DefineSite
+                location={selectedLocation}
+                analysisArea={selectedAnalysisArea}
+                isDrawing={isDrawing}
+                drawingPointCount={drawingPointCount}
+                onUseSuggestedArea={handleUseSuggestedArea}
+                onStartDrawing={handleStartDrawing}
+                onFinishDrawing={() => {
+                  setTriggerFinishDrawing((c) => c + 1);
+                }}
+                onUndoPoint={() => {
+                  setTriggerUndoDrawingPoint((c) => c + 1);
+                }}
+                onCancelDrawing={() => {
+                  setTriggerCancelDrawing((c) => c + 1);
+                  setIsDrawing(false);
+                  setAppPhase('AREA_READY');
+                }}
+                onClearArea={handleClearArea}
+                onConfirmSite={handleConfirmSite}
+              />
+            )}
+
+            {/* ── STEP 3: SET PRIORITIES ── */}
+            {currentStep === 3 && (
+              <Step3SetPriorities
+                onCompile={handleStartCompilation}
+                isCompiling={isCompiling}
+              />
+            )}
+
+            {/* ── STEP 4: COMPILING PROCESSING ANIMATION ── */}
+            {currentStep === 4 && isCompilingScreenActive && (
+              <Step4Compiling
+                onComplete={() => {
+                  setIsCompilingScreenActive(false);
+                  if (interventionFeatures.length > 0 && !selectedIntervention) {
+                    setSelectedIntervention(interventionFeatures[0] as any);
+                  }
+                }}
+              />
+            )}
+
+            {/* ── STEP 4: BEFORE / AFTER MAP SPLIT CONTROLS ── */}
+            {currentStep === 4 && !isCompilingScreenActive && isComparisonOpen && (
+              <BeforeAfterSplit
+                mode={comparisonMode}
+                onChangeMode={(m) => {
+                  setComparisonMode(m);
+                  if (m === 'before') setBeforeAfterSplit(0);
+                  else if (m === 'after') setBeforeAfterSplit(100);
+                  else setBeforeAfterSplit(50);
+                }}
+                splitPercent={beforeAfterSplit}
+                onChangeSplitPercent={setBeforeAfterSplit}
+                onClose={() => setIsComparisonOpen(false)}
+              />
+            )}
+
+            {/* If comparison card was closed, button to re-open */}
+            {currentStep === 4 && !isCompilingScreenActive && !isComparisonOpen && (
+              <div className="absolute top-3 sm:top-4 left-1/2 -translate-x-1/2 z-30 pointer-events-auto">
+                <button
+                  type="button"
+                  onClick={() => setIsComparisonOpen(true)}
+                  className="px-3.5 py-1.5 rounded-full bg-white/95 backdrop-blur-md border border-slate-200 shadow-md text-xs font-bold text-slate-700 hover:text-emerald-800 transition flex items-center gap-1.5"
+                >
+                  <span>Before / After Comparison</span>
+                </button>
+              </div>
+            )}
+
+            {/* ── Mobile Floating Results Toggle (Step 4) ── */}
+            {currentStep === 4 && !isCompilingScreenActive && (
+              <div className="lg:hidden absolute bottom-5 left-1/2 -translate-x-1/2 z-30 pointer-events-auto">
+                <button
+                  type="button"
+                  onClick={() => setIsMobileResultsOpen(true)}
+                  className="px-4 py-2.5 rounded-full bg-emerald-800 hover:bg-emerald-900 text-white font-bold text-xs flex items-center gap-2 shadow-2xl border border-emerald-600/50 transition active:scale-95"
+                >
+                  <Layers className="w-4 h-4 text-emerald-300" />
+                  <span>View Plan & Scenarios</span>
+                  <span className="px-1.5 py-0.5 rounded-full bg-emerald-700 text-[10px] font-mono">3</span>
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Under the results map render <ImpactCards impact={computeImpact(siteFeature, interventionFeatures)} /> */}
+          {currentStep === 4 && !isCompilingScreenActive && (
+            <div className="shrink-0 bg-white border-t border-slate-200/90 px-4 py-3 z-20 pointer-events-auto overflow-x-auto shadow-sm">
+              <div className="max-w-6xl mx-auto">
+                <ImpactCards impact={computeImpact(siteFeature, interventionFeatures)} />
+              </div>
             </div>
           )}
         </main>
@@ -773,6 +802,8 @@ export default function UrbanCompilerPage() {
                   setIsProvenanceOpen(true);
                 }}
                 sitePolygon={siteFeature as any}
+                showInterventions={showInterventions}
+                onToggleShowInterventions={() => setShowInterventions((s) => !s)}
                 className="w-full"
               />
             </div>
@@ -834,6 +865,8 @@ export default function UrbanCompilerPage() {
                   setIsProvenanceOpen(true);
                 }}
                 sitePolygon={siteFeature as any}
+                showInterventions={showInterventions}
+                onToggleShowInterventions={() => setShowInterventions((s) => !s)}
                 className="w-full border-l-0"
               />
             </div>

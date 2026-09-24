@@ -7,12 +7,15 @@ import {
   Droplets,
   Sparkles,
   Database,
-  X
+  X,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import { OptimizationResult, ScenarioType } from '@/types/scenarios';
 import { CandidateInterventionFeature } from '@/types/interventions';
 import { SitePolygon } from '@/types/geo';
-import { computeImpact, fmtHa, fmtINR, normalizeSite, toFeatures } from '@/lib/geo/impact';
+import { computeImpact, fmtHa, fmtINR, normalizeSite, toFeatures, resolveType } from '@/lib/geo/impact';
+import { TYPE_COLOR } from '@/components/map/GeoOverlay';
 
 interface ResultsSidebarProps {
   optimizationResult: OptimizationResult | null;
@@ -23,6 +26,8 @@ interface ResultsSidebarProps {
   onSelectIntervention: (inv: CandidateInterventionFeature | null) => void;
   onOpenProvenance: () => void;
   sitePolygon?: SitePolygon | null;
+  showInterventions?: boolean;
+  onToggleShowInterventions?: () => void;
   className?: string;
 }
 
@@ -35,6 +40,8 @@ export const ResultsSidebar: React.FC<ResultsSidebarProps> = ({
   onSelectIntervention,
   onOpenProvenance,
   sitePolygon,
+  showInterventions = true,
+  onToggleShowInterventions,
   className = ''
 }) => {
   // Scenarios list
@@ -295,13 +302,24 @@ export const ResultsSidebar: React.FC<ResultsSidebarProps> = ({
         <div className="space-y-2">
           <div className="flex items-center justify-between text-[11px] font-bold text-slate-500 uppercase tracking-wider font-mono">
             <span>Generated Features ({interventions.length})</span>
-            <span className="text-emerald-700 font-semibold">GeoJSON</span>
+            {onToggleShowInterventions && (
+              <button
+                type="button"
+                onClick={onToggleShowInterventions}
+                className="text-xs font-semibold text-emerald-800 hover:text-emerald-950 transition flex items-center gap-1"
+                title={showInterventions ? 'Hide intervention overlay' : 'Show intervention overlay'}
+              >
+                {showInterventions ? <Eye className="w-3.5 h-3.5 text-emerald-700" /> : <EyeOff className="w-3.5 h-3.5 text-slate-400" />}
+                <span>{showInterventions ? 'Show All' : 'Hidden'}</span>
+              </button>
+            )}
           </div>
 
           <div className="space-y-1.5 max-h-[300px] overflow-y-auto pr-1">
             {interventions.map((inv) => {
               const isSelected = selectedIntervention?.id === inv.id;
-              const colorHex = inv.properties?.colorHex || '#10b981';
+              const type = resolveType(inv);
+              const colorHex = (type && TYPE_COLOR[type]) || inv.properties?.colorHex || '#10b981';
 
               return (
                 <button

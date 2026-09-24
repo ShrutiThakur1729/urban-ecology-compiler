@@ -45,9 +45,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({
       title: 'Geospatial Ingestion',
       subtitle: 'Multi-Spectral Telemetry',
       badge: 'OBSERVED',
-      desc: 'Streams real-time Copernicus Sentinel-2 NDVI canopy imagery, OpenStreetMap street networks, and 30m OpenElevation hydrological contours.',
+      desc: 'Ingests Copernicus Sentinel-2 NDVI canopy imagery, OpenStreetMap street networks, and 30m OpenElevation hydrological contours.',
       icon: Satellite,
-      highlight: '99.4% spatial resolution accuracy'
+      highlight: 'High-resolution geospatial data synthesis'
     },
     {
       num: '02',

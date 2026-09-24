@@ -4,8 +4,9 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as maplibregl from 'maplibre-gl';
 import { SitePolygon, LngLat, AppPhase } from '@/types/geo';
 import { CandidateInterventionFeature } from '@/types/interventions';
-import { Eye, EyeOff, AlertCircle, RefreshCw, X, Check, Pencil, Layers, Info, Terminal, ChevronDown, ChevronUp } from 'lucide-react';
+import { AlertCircle, RefreshCw } from 'lucide-react';
 import * as turf from '@turf/turf';
+import { computePolygonStats, sanitizeLngLat } from '@/lib/geo/geometryUtils';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // FREE TILE SOURCES — No API key required
@@ -300,6 +301,19 @@ interface MapContainerProps {
   onPolygonDrawn?: (poly: SitePolygon) => void;
   appPhase?: AppPhase;
   onCancelDrawing?: () => void;
+  // Redesign extensions
+  externalBeforeAfterSplit?: number;
+  highlightedInterventionId?: string | null;
+  externalMapStyle?: MapStyleType;
+  onMapStyleChanged?: (style: MapStyleType) => void;
+  onSelectFeature?: (props: any) => void;
+  // Live drawing synchronizations
+  isDrawingMode?: boolean;
+  onDrawingProgress?: (pointsCount: number, points: LngLat[]) => void;
+  triggerFinishDrawing?: number;
+  triggerCancelDrawing?: number;
+  triggerUndoDrawingPoint?: number;
+  comparisonMode?: 'before' | 'after' | 'split';
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -315,10 +329,23 @@ export const MapContainer: React.FC<MapContainerProps> = ({
   isAnalyzing,
   onPolygonDrawn,
   appPhase = 'DASHBOARD',
-  onCancelDrawing
+  onCancelDrawing,
+  externalBeforeAfterSplit = 50,
+  highlightedInterventionId,
+  externalMapStyle,
+  onMapStyleChanged,
+  onSelectFeature,
+  isDrawingMode = false,
+  onDrawingProgress,
+  triggerFinishDrawing,
+  triggerCancelDrawing,
+  triggerUndoDrawingPoint,
+  comparisonMode = 'after'
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
+  const splitMapContainerRef = useRef<HTMLDivElement>(null);
+  const splitMapRef = useRef<maplibregl.Map | null>(null);
   const locationMarkerRef = useRef<maplibregl.Marker | null>(null);
   const mapReadyRef = useRef(false);
 
@@ -332,7 +359,7 @@ export const MapContainer: React.FC<MapContainerProps> = ({
   const drawingPointsRef = useRef<LngLat[]>([]);
   const drawingActiveRef = useRef(false);
 
-  const [mapStyleType, setMapStyleType] = useState<MapStyleType>('dark');
+  const [mapStyleType, setMapStyleType] = useState<MapStyleType>(externalMapStyle || 'satellite');
   const [mapLoadError, setMapLoadError] = useState<string | null>(null);
   const [drawingPointCount, setDrawingPointCount] = useState(0);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -484,8 +511,16 @@ export const MapContainer: React.FC<MapContainerProps> = ({
 
     // 3. Restore Compiled Interventions
     const currentInterventions = interventionsRef.current;
-    const isVisible = showInterventionsRef.current && beforeAfterSplitRef.current > 0;
-    const opacityFactor = isVisible ? beforeAfterSplitRef.current / 100 : 0;
+    // When comparisonMode === 'before' or 'split', base map hides interventions.
+    // In 'after' mode, base map renders interventions at 100%.
+    // In 'split' mode, top synchronized map renders interventions with dynamic clipPath.
+    const isVisible =
+      comparisonMode === 'before'
+        ? false
+        : comparisonMode === 'split'
+        ? false
+        : showInterventionsRef.current;
+    const opacityFactor = isVisible ? 1.0 : 0;
     const visibleItems = currentInterventions.filter(i => !hiddenTypesRef.current.has(i.interventionId));
 
     const fc: GeoJSON.FeatureCollection = {
@@ -570,29 +605,28 @@ export const MapContainer: React.FC<MapContainerProps> = ({
     const pts = drawingPointsRef.current;
     if (pts.length < 3) return;
 
-    const coords: [number, number][] = pts.map(toLngLatCoord);
+    const coords: [number, number][] = pts.map(sanitizeLngLat);
     const closedCoords: [number, number][] = [...coords, coords[0]];
-    const turfPoly = turf.polygon([closedCoords]);
-    const areaSqM = Math.round(turf.area(turfPoly));
-    const perimM = Math.round(turf.length(turf.lineString(closedCoords), { units: 'meters' }));
+    const stats = computePolygonStats(closedCoords);
+    if (!stats) return;
 
     const newPolygon: SitePolygon = {
       type: 'Feature',
       geometry: { type: 'Polygon', coordinates: [closedCoords] },
       properties: {
-        name: locationName ? `${locationName} Custom Area` : 'Custom Urban Area',
-        areaSquareMeters: areaSqM,
-        areaHectares: Number((areaSqM / 10000).toFixed(2)),
-        perimeterMeters: perimM,
+        name: locationName ? `${locationName} Custom Boundary` : 'Custom Urban Boundary',
+        areaSquareMeters: stats.areaSqMeters,
+        areaHectares: stats.areaHectares,
+        perimeterMeters: stats.perimeterMeters,
         createdAt: new Date().toISOString()
       }
     };
 
-    console.log('[DRAW] Finish Area completed:', {
-      areaSqM,
-      areaHa: newPolygon.properties.areaHectares,
-      perimeterMeters: perimM,
-      vertexCount: closedCoords.length,
+    console.log('[DRAW] Finish Boundary completed:', {
+      areaSqM: stats.areaSqMeters,
+      areaHa: stats.areaHectares,
+      perimeterMeters: stats.perimeterMeters,
+      vertexCount: stats.vertexCount,
       coordinates: closedCoords
     });
 
@@ -624,6 +658,7 @@ export const MapContainer: React.FC<MapContainerProps> = ({
       });
 
       try {
+        const turfPoly = turf.polygon([closedCoords]);
         const bbox = turf.bbox(turfPoly);
         map.fitBounds(
           [[bbox[0], bbox[1]], [bbox[2], bbox[3]]],
@@ -643,16 +678,46 @@ export const MapContainer: React.FC<MapContainerProps> = ({
     const count = drawingPointsRef.current.length;
     setDrawingPointCount(count);
 
+    if (onDrawingProgress) {
+      onDrawingProgress(count, [...drawingPointsRef.current]);
+    }
+
     console.log('[DRAW] coordinate received:', { lng: pt[0], lat: pt[1] });
     console.log('[DRAW] vertex count:', count);
-    console.log('[DRAW] GeoJSON coordinates:', JSON.stringify(drawingPointsRef.current));
 
     const map = mapRef.current;
     if (map) {
       renderDrawingPreview(map, [...drawingPointsRef.current]);
-      console.log('[DRAW] map source updated: site-drawing preview updated with vertex count', count);
     }
-  }, [renderDrawingPreview]);
+  }, [renderDrawingPreview, onDrawingProgress]);
+
+  // ─── Drawing triggers from external buttons ────────────────────────────────
+  useEffect(() => {
+    if (triggerFinishDrawing && triggerFinishDrawing > 0) {
+      finishDrawing();
+    }
+  }, [triggerFinishDrawing, finishDrawing]);
+
+  useEffect(() => {
+    if (triggerUndoDrawingPoint && triggerUndoDrawingPoint > 0 && drawingPointsRef.current.length > 0) {
+      drawingPointsRef.current.pop();
+      const count = drawingPointsRef.current.length;
+      setDrawingPointCount(count);
+      const map = mapRef.current;
+      if (map) {
+        renderDrawingPreview(map, [...drawingPointsRef.current]);
+      }
+      if (onDrawingProgress) {
+        onDrawingProgress(count, [...drawingPointsRef.current]);
+      }
+    }
+  }, [triggerUndoDrawingPoint, renderDrawingPreview, onDrawingProgress]);
+
+  useEffect(() => {
+    if (triggerCancelDrawing && triggerCancelDrawing > 0) {
+      cancelDrawing();
+    }
+  }, [triggerCancelDrawing, cancelDrawing]);
 
   // ─── Location Marker ───────────────────────────────────────────────────────
   const updateLocationMarker = useCallback((map: maplibregl.Map, coord: LngLat) => {
@@ -838,6 +903,31 @@ export const MapContainer: React.FC<MapContainerProps> = ({
     restoreApplicationLayers(map);
   }, [interventions, showInterventions, beforeAfterSplit, hiddenTypes, restoreApplicationLayers]);
 
+  // ─── External Controls Synchronization ─────────────────────────────────────
+  useEffect(() => {
+    if (typeof externalBeforeAfterSplit === 'number') {
+      setBeforeAfterSplit(externalBeforeAfterSplit);
+    }
+  }, [externalBeforeAfterSplit]);
+
+  useEffect(() => {
+    if (externalMapStyle && externalMapStyle !== mapStyleType) {
+      handleStyleChange(externalMapStyle);
+    }
+  }, [externalMapStyle, mapStyleType, handleStyleChange]);
+
+  useEffect(() => {
+    if (!highlightedInterventionId) return;
+    const match = interventions.find(i => i.id === highlightedInterventionId);
+    if (match && mapRef.current) {
+      setSelectedFeatureInfo(match.properties);
+      try {
+        const centerCoord = turf.center(match as any).geometry.coordinates as [number, number];
+        mapRef.current.flyTo({ center: centerCoord, zoom: 16, duration: 900 });
+      } catch {}
+    }
+  }, [highlightedInterventionId, interventions]);
+
   // ─── Toggle Intervention Types ─────────────────────────────────────────────
   const toggleType = (id: string) => {
     setHiddenTypes(prev => {
@@ -851,12 +941,101 @@ export const MapContainer: React.FC<MapContainerProps> = ({
     new Map(interventions.map(i => [i.interventionId, { name: i.name, color: i.properties?.colorHex || '#10b981' }])).entries()
   );
 
-  const stats = isDrawing ? liveDrawingStats() : null;
+  // ─── Synchronized Split View Comparison Engine ─────────────────────────────
+  useEffect(() => {
+    if (comparisonMode !== 'split' || !splitMapContainerRef.current) {
+      if (splitMapRef.current) {
+        splitMapRef.current.remove();
+        splitMapRef.current = null;
+      }
+      return;
+    }
+
+    const baseMap = mapRef.current;
+    if (!baseMap) return;
+
+    try {
+      const splitMap = new maplibregl.Map({
+        container: splitMapContainerRef.current,
+        style: buildMapStyle(mapStyleType),
+        center: baseMap.getCenter(),
+        zoom: baseMap.getZoom(),
+        bearing: baseMap.getBearing(),
+        pitch: baseMap.getPitch(),
+        interactive: false,
+        attributionControl: false
+      });
+
+      splitMapRef.current = splitMap;
+
+      splitMap.on('load', () => {
+        // Render interventions with full visibility on split overlay
+        const fc: GeoJSON.FeatureCollection = {
+          type: 'FeatureCollection',
+          features: interventionsRef.current.map(i => ({
+            type: 'Feature' as const,
+            geometry: i.geometry as any,
+            properties: {
+              ...i.properties,
+              id: i.id,
+              name: i.name,
+              interventionId: i.interventionId,
+              colorHex: i.properties?.colorHex || '#10b981'
+            }
+          }))
+        };
+        safeSetSource(splitMap, 'compiled-interventions', fc);
+
+        if (sitePolygonRef.current) {
+          safeSetSource(splitMap, 'selected-site', sitePolygonRef.current as any);
+        }
+
+        // Ensure interventions layer opacity is 1 on split map
+        try {
+          if (splitMap.getLayer('intervention-poly-fill')) splitMap.setPaintProperty('intervention-poly-fill', 'fill-opacity', 0.70);
+          if (splitMap.getLayer('intervention-poly-outline')) splitMap.setPaintProperty('intervention-poly-outline', 'line-opacity', 0.95);
+          if (splitMap.getLayer('intervention-lines')) splitMap.setPaintProperty('intervention-lines', 'line-opacity', 0.95);
+          if (splitMap.getLayer('intervention-points')) splitMap.setPaintProperty('intervention-points', 'circle-opacity', 0.95);
+        } catch {}
+      });
+
+      const syncMaps = () => {
+        if (!splitMapRef.current || !mapRef.current) return;
+        splitMapRef.current.jumpTo({
+          center: mapRef.current.getCenter(),
+          zoom: mapRef.current.getZoom(),
+          bearing: mapRef.current.getBearing(),
+          pitch: mapRef.current.getPitch()
+        });
+      };
+
+      baseMap.on('move', syncMaps);
+
+      return () => {
+        baseMap.off('move', syncMaps);
+        if (splitMapRef.current) {
+          splitMapRef.current.remove();
+          splitMapRef.current = null;
+        }
+      };
+    } catch (e) {
+      console.warn('[MAP] Split map init error:', e);
+    }
+  }, [comparisonMode, mapStyleType]);
 
   return (
     <div className="relative w-full h-full min-h-[450px] bg-slate-950 overflow-hidden">
-      {/* Map WebGL Canvas */}
+      {/* Base Map WebGL Canvas (Baseline Existing Site) */}
       <div ref={mapContainerRef} className="absolute inset-0 w-full h-full" />
+
+      {/* Split Comparison Overlay Map (Compiled Plan) - dynamically clipped along the divider */}
+      {comparisonMode === 'split' && (
+        <div
+          ref={splitMapContainerRef}
+          style={{ clipPath: `inset(0 0 0 ${externalBeforeAfterSplit}%)` }}
+          className="absolute inset-0 w-full h-full pointer-events-none z-10"
+        />
+      )}
 
       {/* Map Load Error Overlay */}
       {mapLoadError && (
@@ -872,319 +1051,6 @@ export const MapContainer: React.FC<MapContainerProps> = ({
           >
             <RefreshCw className="w-3.5 h-3.5" /> Switch to Light Map
           </button>
-        </div>
-      )}
-
-      {/* ── DRAWING MODE UI OVERLAY (Matching Lovable reference) ──────────── */}
-      {isDrawing && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 pointer-events-auto animate-fade-in">
-          <div className="flex flex-col items-center gap-2">
-            {/* Instruction bar */}
-            <div className="flex items-center gap-4 px-6 py-3.5 rounded-2xl bg-slate-950/85 backdrop-blur-xl border border-slate-700/60 text-white shadow-2xl">
-              <div className="p-2 rounded-xl bg-teal-950/70 border border-teal-500/40 text-teal-400">
-                <Pencil className="w-5 h-5" />
-              </div>
-              <div className="flex flex-col text-left">
-                <span className="text-[10px] font-mono tracking-widest uppercase text-teal-400 font-bold">
-                  DRAW SITE BOUNDARY
-                </span>
-                <span className="text-xs font-semibold text-slate-100">
-                  Click points on the map to define your urban site.
-                </span>
-                <span className="text-[11px] font-mono text-slate-400 mt-0.5">
-                  {drawingPointCount} {drawingPointCount === 1 ? 'point' : 'points'} placed
-                </span>
-              </div>
-              <div className="flex items-center gap-3 ml-4">
-                <button
-                  onClick={cancelDrawing}
-                  className="px-3 py-1.5 rounded-xl text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-800/80 transition"
-                >
-                  Cancel
-                </button>
-                {drawingPointCount >= 3 ? (
-                  <button
-                    onClick={finishDrawing}
-                    className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 transition shadow-lg shadow-emerald-950/50"
-                  >
-                    <Check className="w-4 h-4 stroke-[3]" /> Complete boundary
-                  </button>
-                ) : (
-                  <button
-                    disabled
-                    className="px-4 py-2 rounded-xl bg-slate-800/70 text-slate-500 font-medium text-xs flex items-center gap-1.5 cursor-not-allowed opacity-60"
-                  >
-                    <Check className="w-4 h-4" /> Complete boundary
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* Live stats */}
-            {stats && (
-              <div className="flex items-center gap-4 px-4 py-2 rounded-xl bg-slate-900/90 backdrop-blur-md border border-slate-700 text-xs text-slate-300 shadow-lg">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-emerald-400 font-semibold">AREA</span>
-                  <span className="font-mono text-white">{stats.areaHa} Ha</span>
-                  <span className="text-slate-500">({stats.areaSqM.toLocaleString()} m²)</span>
-                </div>
-                <div className="w-px h-4 bg-slate-700" />
-                <div className="flex items-center gap-1.5">
-                  <span className="text-cyan-400 font-semibold">PERIMETER</span>
-                  <span className="font-mono text-white">
-                    {stats.perimM >= 1000 ? `${(stats.perimM / 1000).toFixed(2)} km` : `${stats.perimM} m`}
-                  </span>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* ── MAP STYLE SWITCHER & CONTROLS (Top Left) ──────────────────────── */}
-      <div className="absolute top-4 left-4 z-20 flex flex-col gap-2 pointer-events-auto">
-        <div className="glass-panel rounded-xl p-1 flex items-center gap-0.5 shadow-lg">
-          {(['dark', 'satellite', 'light'] as MapStyleType[]).map(type => (
-            <button
-              key={type}
-              onClick={() => handleStyleChange(type)}
-              className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition ${
-                mapStyleType === type
-                  ? 'bg-slate-800 text-emerald-400 shadow'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              {TILE_SOURCES[type].label}
-            </button>
-          ))}
-        </div>
-
-        {/* Redraw Site Area button in DASHBOARD phase */}
-        {appPhase === 'DASHBOARD' && !isDrawing && (
-          <button
-            onClick={startDrawing}
-            className="glass-panel px-3 py-1.5 rounded-xl text-xs font-medium flex items-center gap-2 text-slate-200 hover:bg-slate-800/90 transition shadow"
-          >
-            <Pencil className="w-3.5 h-3.5 text-emerald-400" />
-            Redraw Site Area
-          </button>
-        )}
-      </div>
-
-      {/* ── COMPILED PLAN SLIDER + INTERVENTIONS LEGEND (Bottom Right) ────── */}
-      {interventions.length > 0 && (
-        <div className="absolute bottom-8 right-4 z-20 flex flex-col gap-2 items-end pointer-events-auto">
-          {/* Spatial Interventions Legend */}
-          <div className="glass-panel p-2.5 rounded-xl shadow-xl max-w-xs text-xs space-y-1.5 border border-slate-800">
-            <div className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-wider text-slate-400 font-semibold border-b border-slate-800 pb-1">
-              <Layers className="w-3 h-3 text-emerald-400" />
-              <span>Proposed Interventions</span>
-              {activeScenarioTitle && (
-                <span className="ml-auto text-emerald-400 font-bold text-[9px] truncate max-w-[110px]">
-                  {activeScenarioTitle}
-                </span>
-              )}
-            </div>
-            <div className="grid grid-cols-1 gap-1 max-h-28 overflow-y-auto pr-1">
-              {interventionTypes.map(([id, info]) => {
-                const hidden = hiddenTypes.has(id);
-                return (
-                  <div
-                    key={id}
-                    onClick={() => toggleType(id)}
-                    className={`flex items-center gap-2 px-1.5 py-0.5 rounded cursor-pointer transition text-[11px] ${
-                      !hidden ? 'text-slate-200 hover:bg-slate-800/60' : 'text-slate-500 line-through opacity-60'
-                    }`}
-                  >
-                    <span
-                      className="w-2.5 h-2.5 rounded-full shrink-0"
-                      style={{ backgroundColor: info.color }}
-                    />
-                    <span className="truncate">{info.name}</span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Before/After slider */}
-          <div className="glass-panel px-4 py-2 rounded-xl flex items-center gap-3 text-xs text-slate-300 shadow-xl">
-            <span className={`font-mono text-[10px] uppercase ${beforeAfterSplit === 0 ? 'text-amber-400 font-bold' : 'text-slate-400'}`}>
-              Current Site
-            </span>
-            <input
-              type="range"
-              min="0"
-              max="100"
-              value={beforeAfterSplit}
-              onChange={e => setBeforeAfterSplit(Number(e.target.value))}
-              className="w-28 accent-emerald-500 cursor-pointer"
-            />
-            <span className={`font-mono text-[10px] uppercase ${beforeAfterSplit === 100 ? 'text-emerald-400 font-bold' : 'text-slate-400'}`}>
-              Compiled ({beforeAfterSplit}%)
-            </span>
-          </div>
-
-          {/* Intervention layers dropdown */}
-          <div className="glass-panel rounded-xl overflow-hidden shadow-xl">
-            <button
-              onClick={() => setShowInterventionList(prev => !prev)}
-              className={`w-full px-3 py-1.5 flex items-center gap-2 text-xs font-medium transition ${
-                showInterventions ? 'text-emerald-300' : 'text-slate-400'
-              }`}
-            >
-              {showInterventions ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-              <span>Interventions ({interventions.length})</span>
-              <span className="ml-auto text-slate-500 text-[10px]">▾</span>
-            </button>
-
-            {showInterventionList && (
-              <div className="border-t border-slate-800 p-2 space-y-1 min-w-[190px]">
-                {/* Master toggle */}
-                <button
-                  onClick={() => setShowInterventions(p => !p)}
-                  className={`w-full text-left text-[11px] px-2 py-1 rounded-lg flex items-center gap-2 transition ${
-                    showInterventions ? 'bg-emerald-950/50 text-emerald-300' : 'text-slate-400 hover:bg-slate-800/60'
-                  }`}
-                >
-                  <span className={`w-3 h-3 rounded border flex items-center justify-center ${showInterventions ? 'bg-emerald-500 border-emerald-500' : 'border-slate-600'}`}>
-                    {showInterventions && <Check className="w-2 h-2 text-white" />}
-                  </span>
-                  All Interventions
-                </button>
-
-                {/* Per-type toggles */}
-                {interventionTypes.map(([id, info]) => {
-                  const hidden = hiddenTypes.has(id);
-                  return (
-                    <button
-                      key={id}
-                      onClick={() => toggleType(id)}
-                      className={`w-full text-left text-[11px] px-2 py-1 rounded-lg flex items-center gap-2 transition ${
-                        !hidden ? 'text-slate-200 hover:bg-slate-800/60' : 'text-slate-500 hover:bg-slate-800/40'
-                      }`}
-                    >
-                      <span className={`w-3 h-3 rounded border flex items-center justify-center ${!hidden ? 'bg-emerald-500 border-emerald-500' : 'border-slate-600'}`}>
-                        {!hidden && <Check className="w-2 h-2 text-white" />}
-                      </span>
-                      {info.name}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* ── STEP 12: DEVELOPER MAP DEBUG HUD (Bottom Left) ────────────────── */}
-      <div className="absolute bottom-6 left-4 z-20 pointer-events-auto">
-        <div className="glass-panel p-2.5 rounded-xl border border-slate-800/90 shadow-2xl text-[10px] font-mono text-slate-300 max-w-[260px] space-y-1">
-          <div
-            onClick={() => setShowDebugHud(!showDebugHud)}
-            className="flex items-center justify-between cursor-pointer text-slate-400 hover:text-slate-200"
-          >
-            <div className="flex items-center gap-1.5 font-bold text-emerald-400">
-              <Terminal className="w-3 h-3" />
-              <span>MAP ENGINE HUD</span>
-            </div>
-            {showDebugHud ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />}
-          </div>
-
-          {showDebugHud && (
-            <div className="space-y-1 pt-1 border-t border-slate-800/80 text-[9.5px]">
-              <div className="flex justify-between">
-                <span className="text-slate-400">MAP:</span>
-                <span className="text-emerald-400 font-semibold">Ready (WebGL Active)</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-400">SITE POLYGON:</span>
-                <span className={sitePolygon ? 'text-emerald-400' : 'text-amber-400'}>
-                  {sitePolygon ? `Polygon (${sitePolygon.properties.areaHectares || 0} ha)` : 'None'}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-400">DRAWING:</span>
-                <span className={isDrawing ? 'text-amber-400 font-bold' : 'text-slate-400'}>
-                  {isDrawing ? `Active (${drawingPointCount} pts)` : 'Idle'}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-400">PHASE:</span>
-                <span className="text-sky-400">{appPhase}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-400">INTERVENTIONS:</span>
-                <span className={interventions.length > 0 ? 'text-emerald-400 font-bold' : 'text-slate-500'}>
-                  {interventions.length} features
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-400">SOURCES:</span>
-                <span className="text-emerald-400">selected-site, compiled-interventions</span>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* ── FEATURE CLICK INSPECTOR MODAL ─────────────────────────────────── */}
-      {selectedFeatureInfo && (
-        <div className="absolute top-16 right-14 z-30 max-w-xs glass-panel p-4 rounded-2xl shadow-2xl border border-slate-700/90 space-y-2 animate-fade-in pointer-events-auto">
-          <div className="flex items-start justify-between">
-            <div className="flex items-center gap-1.5">
-              <span
-                className="w-2.5 h-2.5 rounded-full shrink-0"
-                style={{ backgroundColor: selectedFeatureInfo.colorHex || '#10b981' }}
-              />
-              <h4 className="text-xs font-bold text-slate-100 leading-tight">{selectedFeatureInfo.name}</h4>
-            </div>
-            <button
-              onClick={() => setSelectedFeatureInfo(null)}
-              className="text-slate-400 hover:text-slate-200 px-1 text-xs"
-            >
-              ✕
-            </button>
-          </div>
-          <p className="text-[11px] text-slate-300 leading-relaxed">
-            {selectedFeatureInfo.suitabilityReason}
-          </p>
-          <div className="grid grid-cols-2 gap-1.5 pt-1 text-[10px] font-mono border-t border-slate-800">
-            <div className="p-1.5 rounded bg-slate-900/80">
-              <span className="text-slate-400 block">Footprint</span>
-              <span className="text-slate-200 font-semibold">
-                {Number(selectedFeatureInfo.areaSqMeters || 0).toLocaleString()} m²
-              </span>
-            </div>
-            <div className="p-1.5 rounded bg-slate-900/80">
-              <span className="text-slate-400 block">Est. Cost</span>
-              <span className="text-emerald-400 font-semibold">
-                ₹{(Number(selectedFeatureInfo.estimatedCostInr || 0) / 100000).toFixed(1)} Lakh
-              </span>
-            </div>
-            <div className="p-1.5 rounded bg-slate-900/80">
-              <span className="text-slate-400 block">Runoff Captured</span>
-              <span className="text-cyan-400 font-semibold">
-                {Number(selectedFeatureInfo.runoffInterceptionLiters || 0).toLocaleString()} L
-              </span>
-            </div>
-            <div className="p-1.5 rounded bg-slate-900/80">
-              <span className="text-slate-400 block">Cooling Effect</span>
-              <span className="text-amber-400 font-semibold">
-                -{selectedFeatureInfo.coolingImpactCelsius}°C
-              </span>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── ANALYZING SPINNER OVERLAY ─────────────────────────────────────── */}
-      {isAnalyzing && (
-        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
-          <div className="flex items-center gap-3 px-5 py-2.5 rounded-2xl bg-slate-900/95 backdrop-blur-md border border-cyan-400/40 text-white text-xs font-semibold shadow-2xl animate-pulse">
-            <div className="w-4 h-4 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin" />
-            <span>Analyzing site data — OSM, Elevation, Weather, Sentinel…</span>
-          </div>
         </div>
       )}
     </div>

@@ -13,8 +13,8 @@ interface FloatingSearchBarProps {
 
 const QUICK_HOTSPOTS: (GeoLocation & { badge?: string })[] = [
   {
-    name: 'Thane Central (Naupada & Wagle)',
-    formattedAddress: 'Thane West, Maharashtra, India',
+    name: 'Metropolitan Urban Catchment',
+    formattedAddress: 'Central Resilience Demonstration Zone',
     center: [72.9781, 19.2183],
     zoom: 14,
     placeType: 'city',
@@ -305,7 +305,7 @@ export const FloatingSearchBar: React.FC<FloatingSearchBarProps> = ({
                     }}
                     className="text-[10px] text-emerald-400 hover:text-emerald-300 underline font-medium"
                   >
-                    Load Thane Demo Plan
+                    Load Preloaded Demo Plan
                   </button>
                 )}
               </div>

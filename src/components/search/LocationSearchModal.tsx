@@ -39,8 +39,8 @@ export const LocationSearchModal: React.FC<LocationSearchModalProps> = ({
       placeType: 'city'
     },
     {
-      name: 'Thane Central (Naupada & Wagle)',
-      formattedAddress: 'Thane West, Maharashtra, India',
+      name: 'Metropolitan Urban Catchment',
+      formattedAddress: 'Central Resilience Demonstration Zone',
       center: [72.9781, 19.2183],
       zoom: 14,
       placeType: 'city'

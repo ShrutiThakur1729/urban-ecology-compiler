@@ -15,7 +15,7 @@ export const THANE_DEMO_SITE_POLYGON: SitePolygon = {
     ]]
   },
   properties: {
-    name: 'Thane Central Urban Zone (Naupada & Wagle Estate Edge)',
+    name: 'Metropolitan Resilience Catchment (Urban Pilot Zone)',
     areaSquareMeters: 1320000, // ~132 hectares
     areaHectares: 132,
     perimeterMeters: 4600,
@@ -79,7 +79,7 @@ export const THANE_DEMO_ANALYSIS: SiteAnalysisData = {
       formattedValue: '18,400 m²',
       unit: 'm²',
       classification: 'VULNERABLE',
-      description: 'Open drainage channels and minor retention ponds connected to the Thane Creek catchment.',
+      description: 'Open drainage channels and minor retention ponds connected to the central metropolitan drainage catchment.',
       provenance: {
         category: 'OBSERVED',
         source: 'OpenStreetMap Hydrography Layer',
@@ -500,7 +500,7 @@ export const THANE_DEMO_OPTIMIZED_SCENARIOS: OptimizationResult = {
       },
       assumptions: [
         '50mm rainfall event in a 2-hour window based on Open-Meteo monsoon averages',
-        'Subsoil infiltration rate average of 15 mm/hr for Thane coastal alluvium',
+        'Subsoil infiltration rate average of 15 mm/hr for urban coastal alluvium',
         'No structural modifications needed for selected extensive lightweight green roofs (< 100 kg/m² wet weight)'
       ],
       limitations: 'Cost figures are scenario approximations based on CPWD schedule of rates and should not be used as final civil contracting estimates.'
@@ -542,7 +542,7 @@ export const THANE_DEMO_OPTIMIZED_SCENARIOS: OptimizationResult = {
         {
           id: 'int-bal-tc-1',
           interventionId: 'tree_corridor',
-          name: 'Thane Arterial Green Spine',
+          name: 'Metropolitan Arterial Green Spine',
           geometry: {
             type: 'LineString',
             coordinates: [
@@ -785,7 +785,7 @@ export const THANE_DEMO_OPTIMIZED_SCENARIOS: OptimizationResult = {
       type: 'BIODIVERSITY_FIRST',
       title: 'Urban Rewilding & Habitat Corridors',
       tagline: 'Focuses on high-density native pocket forests, pollinator waystations, and contiguous canopy links.',
-      description: 'Maximizes ecological habitat complexity, endemic plant species diversity, and bird/pollinator corridors connecting urban Thane to the Western Ghats periphery.',
+      description: 'Maximizes ecological habitat complexity, endemic plant species diversity, and bird/pollinator corridors connecting urban corridors to the regional ecological buffer.',
       totalCostInr: 4720000,
       budgetUtilizationPercent: 94.4,
       interventions: [
@@ -866,7 +866,7 @@ export const THANE_DEMO_OPTIMIZED_SCENARIOS: OptimizationResult = {
         {
           id: 'int-bio-gb-1',
           interventionId: 'green_buffer',
-          name: 'Thane Creek Buffer Sanctuary',
+          name: 'Catchment Buffer Wetland Sanctuary',
           geometry: {
             type: 'Polygon',
             coordinates: [[

@@ -175,7 +175,7 @@ export class OSMProvider {
                 [centerLng - spanLng, centerLat - spanLat]
               ]]
             },
-            properties: { layerType: 'building', building: 'commercial', name: 'Thane Central Complex' }
+            properties: { layerType: 'building', building: 'commercial', name: 'Metropolitan Central Complex' }
           }
         ]
       },

@@ -401,6 +401,7 @@ export const MapContainer: React.FC<MapContainerProps> = ({
   triggerUndoDrawingPoint,
   comparisonMode = 'after'
 }) => {
+  const rootWrapperRef = useRef<HTMLDivElement>(null);
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const splitMapContainerRef = useRef<HTMLDivElement>(null);
@@ -577,13 +578,10 @@ export const MapContainer: React.FC<MapContainerProps> = ({
 
     // 3. Restore Compiled Interventions
     const currentInterventions = interventionsRef.current;
-    // When comparisonMode === 'before' or 'split', base map hides interventions.
-    // In 'after' mode, base map renders interventions at 100%.
-    // In 'split' mode, top synchronized map renders interventions with dynamic clipPath.
+    // When comparisonMode === 'before', base map hides interventions.
+    // In 'after' and 'split' modes, interventions stay visible and top split map is clipped.
     const isVisible =
       comparisonMode === 'before'
-        ? false
-        : comparisonMode === 'split'
         ? false
         : showInterventionsRef.current;
     const opacityFactor = isVisible ? 1.0 : 0;
@@ -1006,6 +1004,20 @@ export const MapContainer: React.FC<MapContainerProps> = ({
     new Map(interventions.map(i => [i.interventionId, { name: i.name, color: i.properties?.colorHex || '#10b981' }])).entries()
   );
 
+  // ─── ResizeObserver: ensure canvases resize on panel/window change ───────
+  useEffect(() => {
+    const el = rootWrapperRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+
+    const ro = new ResizeObserver(() => {
+      mapRef.current?.resize();
+      splitMapRef.current?.resize();
+    });
+
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   // ─── Synchronized Split View Comparison Engine ─────────────────────────────
   useEffect(() => {
     if (comparisonMode !== 'split' || !splitMapContainerRef.current) {
@@ -1027,7 +1039,7 @@ export const MapContainer: React.FC<MapContainerProps> = ({
         zoom: baseMap.getZoom(),
         bearing: baseMap.getBearing(),
         pitch: baseMap.getPitch(),
-        interactive: false,
+        interactive: true,
         attributionControl: false
       });
 
@@ -1037,7 +1049,7 @@ export const MapContainer: React.FC<MapContainerProps> = ({
         // Render interventions with full visibility on split overlay
         const fc: GeoJSON.FeatureCollection = {
           type: 'FeatureCollection',
-          features: interventionsRef.current.map(i => ({
+          features: interventions.map(i => ({
             type: 'Feature' as const,
             geometry: i.geometry as any,
             properties: {
@@ -1051,8 +1063,8 @@ export const MapContainer: React.FC<MapContainerProps> = ({
         };
         safeSetSource(splitMap, 'compiled-interventions', fc);
 
-        if (sitePolygonRef.current) {
-          safeSetSource(splitMap, 'selected-site', sitePolygonRef.current as any);
+        if (sitePolygon) {
+          safeSetSource(splitMap, 'selected-site', sitePolygon as any);
         }
 
         // Ensure interventions layer opacity is 1 on split map
@@ -1064,21 +1076,39 @@ export const MapContainer: React.FC<MapContainerProps> = ({
         } catch {}
       });
 
-      const syncMaps = () => {
-        if (!splitMapRef.current || !mapRef.current) return;
+      // Two-way camera sync with a lock flag
+      let isSyncing = false;
+      const syncBaseToSplit = () => {
+        if (isSyncing || !splitMapRef.current || !mapRef.current) return;
+        isSyncing = true;
         splitMapRef.current.jumpTo({
           center: mapRef.current.getCenter(),
           zoom: mapRef.current.getZoom(),
           bearing: mapRef.current.getBearing(),
           pitch: mapRef.current.getPitch()
         });
+        isSyncing = false;
       };
 
-      baseMap.on('move', syncMaps);
+      const syncSplitToBase = () => {
+        if (isSyncing || !splitMapRef.current || !mapRef.current) return;
+        isSyncing = true;
+        mapRef.current.jumpTo({
+          center: splitMapRef.current.getCenter(),
+          zoom: splitMapRef.current.getZoom(),
+          bearing: splitMapRef.current.getBearing(),
+          pitch: splitMapRef.current.getPitch()
+        });
+        isSyncing = false;
+      };
+
+      baseMap.on('move', syncBaseToSplit);
+      splitMap.on('move', syncSplitToBase);
 
       return () => {
-        baseMap.off('move', syncMaps);
+        baseMap.off('move', syncBaseToSplit);
         if (splitMapRef.current) {
+          splitMapRef.current.off('move', syncSplitToBase);
           splitMapRef.current.remove();
           splitMapRef.current = null;
         }
@@ -1086,10 +1116,10 @@ export const MapContainer: React.FC<MapContainerProps> = ({
     } catch (e) {
       console.warn('[MAP] Split map init error:', e);
     }
-  }, [comparisonMode, mapStyleType]);
+  }, [comparisonMode, mapStyleType, interventions, sitePolygon]);
 
   return (
-    <div className="relative w-full h-full min-h-[450px] bg-slate-950 overflow-hidden">
+    <div ref={rootWrapperRef} className="relative w-full h-full min-h-[450px] bg-slate-950 overflow-hidden">
       {/* Base Map WebGL Canvas (Baseline Existing Site) */}
       <div ref={mapContainerRef} className="absolute inset-0 w-full h-full" />
 
@@ -1098,7 +1128,7 @@ export const MapContainer: React.FC<MapContainerProps> = ({
         <div
           ref={splitMapContainerRef}
           style={{ clipPath: `inset(0 0 0 ${externalBeforeAfterSplit}%)` }}
-          className="absolute inset-0 w-full h-full pointer-events-none z-10"
+          className="absolute inset-0 w-full h-full pointer-events-auto z-10"
         />
       )}
 

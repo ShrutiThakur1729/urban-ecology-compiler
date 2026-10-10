@@ -1,7 +1,7 @@
 # Urban Ecology Compiler
 ### Geospatial AI Environmental Decision Support System
 
-[![Netlify Status](https://api.netlify.com/api/v1/badges/placeholder/deploy-status)](https://app.netlify.com)
+[![Netlify Status](https://api.netlify.com/api/v1/badges/placeholder/deploy-status)]([https://app.netlify.com](https://urbanecologycompiler.netlify.app/))
 [![Next.js](https://img.shields.io/badge/Next.js-16.3-black)](https://nextjs.org)
 [![MapLibre GL](https://img.shields.io/badge/MapLibre_GL-6.10-blue)](https://maplibre.org)
 [![Gemini AI](https://img.shields.io/badge/Gemini_AI-1.5_Pro-orange)](https://ai.google.dev)
